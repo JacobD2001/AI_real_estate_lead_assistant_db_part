@@ -19,31 +19,76 @@ email_parser = PydanticOutputParser(pydantic_object=EmailOutput)
 # Load environment variables from .env file for local development
 load_dotenv()
 
+# Function to fetch the latest offer and signature from NocoDB
+def fetch_latest_offer_and_signature(nocodb_api_url, table_id, api_token):
+    headers = {
+        'xc-token': api_token,
+        'Content-Type': 'application/json'
+    }
+    params = {
+        'limit': 1,
+        'offset': 0,
+        'sort': '-Id'  # Adjust sorting if necessary
+    }
+
+    # Making the request to get the latest record
+    response = requests.get(
+        f"https://{nocodb_api_url}/api/v2/tables/{table_id}/records",
+        headers=headers,
+        params=params
+    )
+    
+    # Raise an exception if the request was unsuccessful
+    if response.status_code != 200:
+        raise Exception(f"Failed to fetch records: {response.text}")
+
+    # Parse the response JSON
+    data = response.json()
+    records = data.get('list', [])
+    
+    # Raise an exception if no records are found
+    if not records:
+        raise Exception("No records found in the table for offer and signature.")
+
+    # Access the first (latest) record
+    latest_record = records[0]
+    
+    # Fetch the 'Offer' and 'Signature' values from the record (adjust based on your actual field names)
+    offer = latest_record.get('Offer', '')  # Adjust 'Offer' to match your field name
+    signature = latest_record.get('Email Signature', '')  # Adjust 'Signature' to match your field name
+
+    return offer, signature
+
 # Function to set up and call LLM for generating emails
-def generate_personalized_emails(agents_records, openai_api_key):
+def generate_personalized_emails(agents_records, openai_api_key, offer, signature):
   
     # Initialize OpenAI LLM
     llm = ChatOpenAI(api_key=openai_api_key, temperature=0.7, model_name="gpt-4")
 
     # Create the prompt template with format instructions
-    # TODO: Work on the prompt to get the correct mail and apply the footer
     email_prompt_template = """
     You are a professional email assistant. Generate a personalized email subject and content based on the agent's details provided below.
 
     Agent Details:
     {agent_details}
 
+    Offer:
+    {offer}
+
+    Email Signature:
+    {signature}
+
     Email Guidelines:
     - The email should be professional and courteous.
     - Address the agent by their name.
     - Mention any relevant details that make the email personalized.
 
-    \n{format_instructions}
+    {format_instructions}
     """
 
     # Create the prompt template object
     email_prompt = PromptTemplate(
-        input_variables=["agent_details"],
+        input_variables=["agent_details", "offer", "signature"],
         template=email_prompt_template,
         partial_variables={
             "format_instructions": email_parser.get_format_instructions()
@@ -57,7 +102,11 @@ def generate_personalized_emails(agents_records, openai_api_key):
 
         try:
             # Invoke the LLM with the prompt
-            prompt_with_data = email_prompt.format(agent_details=agent_details)
+            prompt_with_data = email_prompt.format(
+                agent_details=agent_details, 
+                offer=offer, 
+                signature=signature
+            )
             result = llm(prompt_with_data)
             
             # Parse the result using the email parser
@@ -108,8 +157,6 @@ def insert_emails_into_nocodb(nocodb_api_url, table_id, api_token, emails_data):
 
     print("Successfully inserted records into NocoDB.")
 
-
-
 # Function to fetch agent details from NocoDB
 def fetch_agents_details(nocodb_api_url, table_id, api_token, batch_size=100):
     headers = {
@@ -153,20 +200,29 @@ def handler():
     NOCO_DB_API_TOKEN = os.getenv("NOCO_DB_API_TOKEN")
     AGENT_TABLE_ID = os.getenv("AGENT_TABLE_ID")
     LEADS_ACTION_TABLE = os.getenv("LEADS_ACTION_TABLE")
+    OFFER_SIGNATURE_TABLE_ID = os.getenv("OFFER_SIGNATURE_TABLE_ID")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     BATCH_SIZE = 100
 
-    # Step 1: Fetch agent details (replace with mock data or actual call)
-    agents_records = fetch_agents_details(NOCO_DB_API_URL, AGENT_TABLE_ID, NOCO_DB_API_TOKEN, BATCH_SIZE)
+    # Step 1: Fetch agent details
+    agents_records = fetch_agents_details(
+        NOCO_DB_API_URL, AGENT_TABLE_ID, NOCO_DB_API_TOKEN, BATCH_SIZE)
     print("Agents records:", agents_records)
 
-    # Step 2: Generate personalized emails
-    personalized_emails = generate_personalized_emails(agents_records, OPENAI_API_KEY)
+    # Step 2: Fetch the latest offer and signature
+    offer, signature = fetch_latest_offer_and_signature(
+        NOCO_DB_API_URL, OFFER_SIGNATURE_TABLE_ID, NOCO_DB_API_TOKEN)
+    print("Offer:", offer)
+    print("Signature:", signature)
+
+    # Step 3: Generate personalized emails
+    personalized_emails = generate_personalized_emails(
+        agents_records, OPENAI_API_KEY, offer, signature)
     print("Generated Emails:", personalized_emails)
 
-    # Step 3: Insert emails into NocoDB
-
-    insert_emails_into_nocodb(NOCO_DB_API_URL, LEADS_ACTION_TABLE, NOCO_DB_API_TOKEN, personalized_emails)
+    # Step 4: Insert emails into NocoDB
+    insert_emails_into_nocodb(
+        NOCO_DB_API_URL, LEADS_ACTION_TABLE, NOCO_DB_API_TOKEN, personalized_emails)
     print("Inserted emails into NocoDB.")
 
     # Return data that can be used in future steps
