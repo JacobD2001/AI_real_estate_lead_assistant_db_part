@@ -7,6 +7,10 @@ from langchain.prompts.prompt import PromptTemplate
 from typing import Dict
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+load_dotenv()
 
 # Define the expected output model for the email
 class EmailOutput(BaseModel):
@@ -15,9 +19,6 @@ class EmailOutput(BaseModel):
 
 # Create the Pydantic output parser using the model
 email_parser = PydanticOutputParser(pydantic_object=EmailOutput)
-
-# Load environment variables from .env file for local development
-load_dotenv()
 
 # Function to fetch the latest offer and signature from NocoDB
 def fetch_latest_offer_and_signature(nocodb_api_url, table_id, api_token):
@@ -192,17 +193,20 @@ def fetch_agents_details(nocodb_api_url, table_id, api_token, batch_size=100):
 
     return all_records
 
-# Mock Pipedream handler function for local development
-def handler():
-
-    # Set up configuration variables from environment or mock data
+@app.route('/process-agents', methods=['POST'])
+def process_agents():
+    data = request.json
+    AGENT_TABLE_ID = data.get('agent_table_id')
     NOCO_DB_API_URL = os.getenv("NOCO_DB_API_URL")
     NOCO_DB_API_TOKEN = os.getenv("NOCO_DB_API_TOKEN")
-    AGENT_TABLE_ID = os.getenv("AGENT_TABLE_ID")
+    # AGENT_TABLE_ID = os.getenv("AGENT_TABLE_ID")
     LEADS_ACTION_TABLE = os.getenv("LEADS_ACTION_TABLE")
     OFFER_SIGNATURE_TABLE_ID = os.getenv("OFFER_SIGNATURE_TABLE_ID")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     BATCH_SIZE = 100
+
+    if not AGENT_TABLE_ID:
+        return jsonify({'error': 'agent_table_id is required'}), 400  
 
     # Step 1: Fetch agent details
     agents_records = fetch_agents_details(
@@ -226,8 +230,8 @@ def handler():
     print("Inserted emails into NocoDB.")
 
     # Return data that can be used in future steps
-    return {"success": True, "processed_emails": len(personalized_emails)}
+    return jsonify({'processed_emails': personalized_emails}), 200
 
 # Call handler function for local debugging
-if __name__ == "__main__":
-    handler()
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
