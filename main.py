@@ -1,6 +1,8 @@
 import requests
 import json
 import os
+import logging
+import sys
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.prompts.prompt import PromptTemplate
@@ -9,15 +11,21 @@ from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 from flask import Flask, request, jsonify
 
+# Configuration
 app = Flask(__name__)
 load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout) 
+    ]
+)
 
-# Define the expected output model for the email
 class EmailOutput(BaseModel):
     email_subject: str = Field(description="Subject of the email")
     email_content: str = Field(description="Content/body of the email")
 
-# Create the Pydantic output parser using the model
 email_parser = PydanticOutputParser(pydantic_object=EmailOutput)
 
 # Function to fetch the latest offer and signature from NocoDB
@@ -29,44 +37,36 @@ def fetch_latest_offer_and_signature(nocodb_api_url, table_id, api_token):
     params = {
         'limit': 1,
         'offset': 0,
-        'sort': '-Id'  # Adjust sorting if necessary
+        'sort': '-Id'
     }
 
-    # Making the request to get the latest record
     response = requests.get(
         f"https://{nocodb_api_url}/api/v2/tables/{table_id}/records",
         headers=headers,
         params=params
     )
     
-    # Raise an exception if the request was unsuccessful
     if response.status_code != 200:
+        logging.error(f"Failed to fetch records: {response.text}")
         raise Exception(f"Failed to fetch records: {response.text}")
 
-    # Parse the response JSON
     data = response.json()
     records = data.get('list', [])
     
-    # Raise an exception if no records are found
     if not records:
+        logging.error("No records found in the table for offer and signature.")
         raise Exception("No records found in the table for offer and signature.")
 
-    # Access the first (latest) record
     latest_record = records[0]
-    
-    # Fetch the 'Offer' and 'Signature' values from the record (adjust based on your actual field names)
-    offer = latest_record.get('Offer', '')  # Adjust 'Offer' to match your field name
-    signature = latest_record.get('Email Signature', '')  # Adjust 'Signature' to match your field name
+    offer = latest_record.get('Offer', '')
+    signature = latest_record.get('Email Signature', '')
 
     return offer, signature
 
 # Function to set up and call LLM for generating emails
 def generate_personalized_emails(agents_records, openai_api_key, offer, signature):
-  
-    # Initialize OpenAI LLM
     llm = ChatOpenAI(api_key=openai_api_key, temperature=0.7, model_name="gpt-4o-mini")
 
-    # Create the prompt template with format instructions
     email_prompt_template = """
     # Context
     You are the best email copywriter in the world, specializing in crafting emails that drive real results. You will be given:
@@ -191,17 +191,9 @@ def generate_personalized_emails(agents_records, openai_api_key, offer, signatur
                 signature=signature
             )
             result = llm(prompt_with_data)
-            
-            # Parse the result using the email parser
             parsed_result = email_parser.parse(result.content)
-            
-            # Extract email subject and content from the parsed result
             email_subject = parsed_result.email_subject.strip()
             email_content = parsed_result.email_content.strip()
-
-            # Print the result for debugging
-            print("RESULT", parsed_result)
-
             personalized_emails.append({
                 'Email': agent_data.get('Agent Email', ''),
                 'Email-Subject': email_subject,
@@ -210,7 +202,7 @@ def generate_personalized_emails(agents_records, openai_api_key, offer, signatur
                 'Status': 'Pending'
             })
         except Exception as e:
-            print(f"Failed to generate email for agent {agent_data.get('Agent Email', 'unknown')}: {e}")
+            logging.error(f"Failed to generate email for agent {agent_data.get('Agent Email', 'unknown')}: {e}")
 
     return personalized_emails
 
@@ -222,11 +214,7 @@ def insert_emails_into_nocodb(nocodb_api_url, table_id, api_token, emails_data):
         'Content-Type': 'application/json'
     }
 
-    # Modify payload to remove 'fields' key and pass data directly
     payload = [email_data for email_data in emails_data]
-
-    # Print payload for debugging
-    print("Payload being sent:", json.dumps(payload, indent=4))
 
     response = requests.post(
         f"https://{nocodb_api_url}/api/v2/tables/{table_id}/records",
@@ -234,12 +222,11 @@ def insert_emails_into_nocodb(nocodb_api_url, table_id, api_token, emails_data):
         data=json.dumps(payload)
     )
 
-    print("Response:", response.text)
-
     if response.status_code != 200:
+        logging.error(f"Failed to insert records: {response.text}")
         raise Exception(f"Failed to insert records: {response.text}")
 
-    print("Successfully inserted records into NocoDB.")
+    logging.info("Successfully inserted records into NocoDB.")
 
 # Function to fetch agent details from NocoDB
 def fetch_agents_details(nocodb_api_url, table_id, api_token, batch_size=100):
@@ -261,6 +248,7 @@ def fetch_agents_details(nocodb_api_url, table_id, api_token, batch_size=100):
             params=params
         )
         if response.status_code != 200:
+            logging.error(f"Failed to fetch records: {response.text}")
             raise Exception(f"Failed to fetch records: {response.text}")
 
         data = response.json()
@@ -282,7 +270,6 @@ def process_agents():
     AGENT_TABLE_ID = data.get('agent_table_id')
     NOCO_DB_API_URL = os.getenv("NOCO_DB_API_URL")
     NOCO_DB_API_TOKEN = os.getenv("NOCO_DB_API_TOKEN")
-    # AGENT_TABLE_ID = os.getenv("AGENT_TABLE_ID")
     LEADS_ACTION_TABLE = os.getenv("LEADS_ACTION_TABLE")
     OFFER_SIGNATURE_TABLE_ID = os.getenv("OFFER_SIGNATURE_TABLE_ID")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -291,30 +278,23 @@ def process_agents():
     if not AGENT_TABLE_ID:
         return jsonify({'error': 'agent_table_id is required'}), 400  
 
-    # Step 1: Fetch agent details
     agents_records = fetch_agents_details(
         NOCO_DB_API_URL, AGENT_TABLE_ID, NOCO_DB_API_TOKEN, BATCH_SIZE)
-    print("Agents records:", agents_records)
+    logging.info("Fetched agent records.")
 
-    # Step 2: Fetch the latest offer and signature
     offer, signature = fetch_latest_offer_and_signature(
         NOCO_DB_API_URL, OFFER_SIGNATURE_TABLE_ID, NOCO_DB_API_TOKEN)
-    print("Offer:", offer)
-    print("Signature:", signature)
+    logging.info("Fetched latest offer and signature.")
 
-    # Step 3: Generate personalized emails
     personalized_emails = generate_personalized_emails(
         agents_records, OPENAI_API_KEY, offer, signature)
-    print("Generated Emails:", personalized_emails)
+    logging.info("Generated personalized emails.")
 
-    # Step 4: Insert emails into NocoDB
     insert_emails_into_nocodb(
         NOCO_DB_API_URL, LEADS_ACTION_TABLE, NOCO_DB_API_TOKEN, personalized_emails)
-    print("Inserted emails into NocoDB.")
+    logging.info("Inserted emails into NocoDB.")
 
-    # Return data that can be used in future steps
     return jsonify({'processed_emails': personalized_emails}), 200
 
-# Call handler function for local debugging
 # if __name__ == '__main__':
 #     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
