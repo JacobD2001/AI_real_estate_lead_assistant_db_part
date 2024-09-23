@@ -316,5 +316,5 @@ def process_agents():
     return jsonify({'processed_emails': personalized_emails}), 200
 
 # Call handler function for local debugging
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+# if __name__ == '__main__':
+#     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))

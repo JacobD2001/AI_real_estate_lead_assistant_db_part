@@ -1,1 +1,1 @@
-web: python main.py
+web: gunicorn --log-level=info --access-logfile=- --error-logfile=- wsgi:app
