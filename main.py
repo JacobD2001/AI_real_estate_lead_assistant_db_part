@@ -14,13 +14,7 @@ from flask import Flask, request, jsonify
 # Configuration
 app = Flask(__name__)
 load_dotenv()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout) 
-    ]
-)
+logging.basicConfig(level=logging.INFO)
 
 class EmailOutput(BaseModel):
     email_subject: str = Field(description="Subject of the email")
