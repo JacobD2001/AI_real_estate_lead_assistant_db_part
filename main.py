@@ -2,18 +2,17 @@ import requests
 import json
 import os
 import logging
-import sys
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.prompts.prompt import PromptTemplate
 from typing import Dict
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
-# Configuration
-app = Flask(__name__)
 load_dotenv()
+app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
 class EmailOutput(BaseModel):
@@ -258,9 +257,8 @@ def fetch_agents_details(nocodb_api_url, table_id, api_token, batch_size=100):
 
     return all_records
 
-@app.route('/process-agents', methods=['POST'])
-def process_agents():
-    data = request.json
+@app.post('/process-agents')
+def process_agents(data: Dict):
     AGENT_TABLE_ID = data.get('agent_table_id')
     NOCO_DB_API_URL = os.getenv("NOCO_DB_API_URL")
     NOCO_DB_API_TOKEN = os.getenv("NOCO_DB_API_TOKEN")
@@ -270,7 +268,7 @@ def process_agents():
     BATCH_SIZE = 100
 
     if not AGENT_TABLE_ID:
-        return jsonify({'error': 'agent_table_id is required'}), 400  
+        raise HTTPException(status_code=400, detail="agent_table_id is required")
 
     agents_records = fetch_agents_details(
         NOCO_DB_API_URL, AGENT_TABLE_ID, NOCO_DB_API_TOKEN, BATCH_SIZE)
@@ -288,7 +286,7 @@ def process_agents():
         NOCO_DB_API_URL, LEADS_ACTION_TABLE, NOCO_DB_API_TOKEN, personalized_emails)
     logging.info("Inserted emails into NocoDB.")
 
-    return jsonify({'processed_emails': personalized_emails}), 200
+    return JSONResponse({'processed_emails': personalized_emails}), 200
 
 # if __name__ == '__main__':
 #     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))

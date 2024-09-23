@@ -9,8 +9,8 @@ python-dotenv = "*"
 langchain = "*"
 langchain-openai = "*"
 pydantic = "*"
-flask = "*"
-gunicorn = "*"
+fastapi = "*"
+uvicorn = "*"
 
 [dev-packages]
 
